@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="./libs/d3.js"></script>
+    <script src="libs/d3jstopojson.v1.js"></script>
+    <title>Geospatial Visualizations</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        h1, h3 {
+            text-align: center;
+            color: #333;
+            margin: 5px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        .map-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #ffffff;
+            box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.2);
+            border: 1px solid #ddd;
+            width: 100%;
+        }
+
+        .map-box {
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.15);
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+        }
+
+        #tooltip {
+            position: absolute;
+            opacity: 0;
+            padding: 10px;
+            background: white;
+            font-size: 0.9em;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        path {
+            stroke: black;
+            stroke-width: 0.5px;
+        }
+
+        path:hover {
+            opacity: 0.8;
+            stroke: yellow;
+            stroke-width: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Major Assignment 2: Geospatial Visualizations</h1>
+    <h3>Aman Thakur</h3>
+
+    <div id="tooltip"></div>
+
+    <div class="container">
+        <!-- Box for Map A -->
+        <div class="map-box">
+            <h3>Population in 1980</h3>
+            <div class="map-container fig1"></div>
+        </div>
+
+        <!-- Box for Map B -->
+        <div class="map-box">
+            <h3>Population Change (1980-2010)</h3>
+            <div class="map-container fig2"></div>
+        </div>
+
+        <!-- Box for Map C -->
+        <div class="map-box">
+            <h3>Gini Index (2019)</h3>
+            <div class="map-container fig3"></div>
+        </div>
+    </div>
+
+    <script>
+        // Set fixed SVG dimensions
+        const svgWidth = 600;  
+        const svgHeight = 400;
+
+        // Paths to the TopoJSON and CSV files
+        const MA_counties = "./data/towns.topojson";
+        const gini_index = "./data/gini_index.csv";
+
+        Promise.all([d3.json(MA_counties), d3.csv(gini_index)])
+            .then(data => {
+                const topology_data = data[0];   // TopoJSON data
+                const csv_data = data[1];        // CSV data
+
+                // Create a map to store Gini Index values by FIPS code
+                const giniMap = new Map();
+                csv_data.forEach(row => {
+                    const fipsCode = row["id"].replace("0500000US", "");  // Remove prefix
+                    const giniValue = +row["Estimate!!Gini Index"];
+                    giniMap.set(fipsCode, giniValue);
+                });
+
+                topology_data.objects.ma.geometries.forEach(d => {
+                    const fipsCode = d.properties.FIPS_STCO.toString().trim();
+                    d.properties["GiniIndex"] = giniMap.has(fipsCode) ? giniMap.get(fipsCode) : null;
+                });
+
+                const generateMap = (topo_data, containerName, colorField, colorRange, tooltipField) => {
+                    const svg = d3.select(containerName).append("svg")
+                        .attr("width", svgWidth)
+                        .attr("height", svgHeight);
+
+                    const geojson = topojson.feature(topo_data, topo_data.objects.ma);
+
+                    const projection = d3.geoMercator()
+                        .fitSize([svgWidth, svgHeight - 50], geojson); 
+                    const geoPath_generator = d3.geoPath().projection(projection);
+
+                    const colorScale = d3.scaleLinear()
+                        .domain(d3.extent(geojson.features, d => d.properties[colorField]))
+                        .range(colorRange);
+
+                    const tooltip = d3.select("#tooltip");
+
+                    svg.selectAll("path")
+                        .data(geojson.features)
+                        .enter()
+                        .append("path")
+                        .attr("d", geoPath_generator)
+                        .attr("fill", d => {
+                            const value = d.properties[colorField];
+                            return value !== null && value !== undefined ? colorScale(value) : "#ccc";
+                        })
+                        .on("mouseenter", (event, d) => {
+                            const value = d.properties[colorField];
+                            tooltip.transition().duration(200).style("opacity", 1);
+                            tooltip.html(`
+                                <strong>${d.properties[tooltipField]}</strong><br>
+                                Value: ${value !== null && value !== undefined ? value : "N/A"}
+                            `)
+                                .style("left", (event.pageX + 10) + "px")
+                                .style("top", (event.pageY - 28) + "px");
+
+                            d3.select(event.currentTarget)
+                                .style("stroke", "yellow")
+                                .style("stroke-width", 2);
+                        })
+                        .on("mousemove", event => tooltip.style("opacity", 1))
+                        .on("mouseleave", (event) => {
+                            tooltip.transition().duration(400).style("opacity", 0);
+
+                            d3.select(event.currentTarget)
+                                .style("stroke", "black")
+                                .style("stroke-width", 0.5);
+                        });
+                };
+
+                // MAP A - Population in 1980
+                generateMap(topology_data, ".fig1", "POP1980", ["#f7fcf5", "#00441b"], "TOWN");
+
+                // MAP B - Population Change (1980-2010)
+                topology_data.objects.ma.geometries.forEach(d => {
+                    d.properties.POPCHANGE = d.properties.POP2010 - d.properties.POP1980;
+                });
+                generateMap(topology_data, ".fig2", "POPCHANGE", ["#fee5d9", "#a50f15"], "TOWN");
+
+                // MAP C - Gini Index (2019)
+                generateMap(topology_data, ".fig3", "GiniIndex", ["#f0f9e8", "#0868ac"], "TOWN");
+            });
+    </script>
+</body>
+
+</html>
